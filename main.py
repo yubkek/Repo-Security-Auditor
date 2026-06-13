@@ -39,9 +39,10 @@ def chat_with_agent(user_message: str) -> None:
 
 
 if __name__ == "__main__":
-    print("Starting RepoMind...")
     build_vector_store()
 
     chat_with_agent("Are there any security issues in how tokens or sessions are handled?")
     chat_with_agent("How is user input validated before it hits the database?")
     chat_with_agent("Summarise all the vulnerabilities you found so far.")
+
+# claude --resume 166df2a1-9888-465d-bc54-450405d1c094

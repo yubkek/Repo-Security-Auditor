@@ -12,6 +12,5 @@ EMBEDDING_MODEL = "text-embedding-3-small"  # cheap + good enough for code searc
 
 TOKEN_THRESHOLD = 450  # kept low so compaction kicks in fast during the demo
 TOP_K = 2 # how many code chunks to pull per query
-CHUNK_SIZE = 40 # lines per chunk when splitting files
 
 CODEBASE_DIR = "." # point this at whatever repo you want to audit
