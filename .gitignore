@@ -1,5 +1,7 @@
 .env
 .env.local
+.embedding_cache.json
+.vector_store.json
 .env*.local
 __pycache__/
 *.pyc
