@@ -3,7 +3,7 @@ from rag import build_vector_store, run_rag_search
 from context import compact_history, should_compact
 
 conversation_history: list[dict] = [] # raw verbatim tail
-compacted_state_summary: str = "No previous history compressed yet." # everything older lives here
+compacted_state_summary: str = "No previous history compressed yet" # everything older lives here
 
 
 def chat_with_agent(user_message: str) -> None:

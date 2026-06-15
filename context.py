@@ -38,7 +38,7 @@ def compact_history(
     )
 
     new_summary = response.choices[0].message.content
-    print("[COMPACTOR] Done. Raw history wiped. Summary updated.")
+    print("[COMPACTOR] Done. Raw history wiped. Summary updated")
     return tail_history, new_summary
 
 def should_compact(conversation_history: list[dict]) -> bool:

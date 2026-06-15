@@ -1,25 +1,38 @@
 import os
-from openai import OpenAI
 
-# grab the key or die early - better than a cryptic auth error 3 calls in
-api_key = os.environ.get("OPENAI_API_KEY")
-if not api_key:
-    raise EnvironmentError("OPENAI_API_KEY environment variable is not set.")
+# switch between "openai" and "groq" here
+PROVIDER = "openai"
 
-client = OpenAI(api_key=api_key)
+if PROVIDER == "openai":
+    from openai import OpenAI
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        raise EnvironmentError("OPENAI_API_KEY environment variable is not set")
+    client = OpenAI(api_key=api_key)
+    MODEL_NAME = "gpt-4o-mini"
+    EMBEDDING_MODEL = "text-embedding-3-small"  # api-based, billed per token
 
-MODEL_NAME = "gpt-4o-mini"
-EMBEDDING_MODEL = "text-embedding-3-small"  # cheap + good enough for code search
+elif PROVIDER == "groq":
+    from groq import Groq
+    api_key = os.environ.get("GROQ_API_KEY")
+    if not api_key:
+        raise EnvironmentError("GROQ_API_KEY environment variable is not set")
+    client = Groq(api_key=api_key)
+    MODEL_NAME = "llama-3.3-70b-versatile"
+    EMBEDDING_MODEL = "all-MiniLM-L6-v2"  # runs locally via sentence-transformers, no api key needed
 
-TOKEN_THRESHOLD = 150_000  # ~80% of gpt-4o-mini's 128k context window
-TOP_K = 3                  # how many chunks to return after re-ranking
-RERANK_CANDIDATES = 9      # how many cosine candidates to fetch before re-ranking down to TOP_K
-CHUNK_SIZE = 60            # lines per chunk for non-Python files
-SCORE_THRESHOLD = 0.3      # discard chunks below this similarity - stops hallucination from irrelevant context
+else:
+    raise ValueError(f"Unknown provider '{PROVIDER}' - use 'openai' or 'groq'")
 
-CODEBASE_DIR = "."                    # point this at whatever repo you want to audit
-CACHE_PATH = ".embedding_cache.json"  # persists embeddings between runs
-STORE_PATH = ".vector_store.pkl"      # persists the full vector store between runs (pickle, not JSON)
+TOKEN_THRESHOLD = 150_000
+TOP_K = 3
+RERANK_CANDIDATES = 9
+CHUNK_SIZE = 60
+SCORE_THRESHOLD = 0.3
+
+CODEBASE_DIR = "."
+CACHE_PATH = ".embedding_cache.json"
+STORE_PATH = ".vector_store.pkl"
 
 FILE_EXTENSIONS = {
     ".py", ".js", ".ts", ".tsx", ".jsx",

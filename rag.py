@@ -4,10 +4,14 @@ import json
 import os
 import pickle
 import numpy as np
-from config import client, MODEL_NAME, EMBEDDING_MODEL, TOP_K, RERANK_CANDIDATES, CHUNK_SIZE, SCORE_THRESHOLD, CODEBASE_DIR, CACHE_PATH, STORE_PATH, FILE_EXTENSIONS
+from config import client, PROVIDER, MODEL_NAME, EMBEDDING_MODEL, TOP_K, RERANK_CANDIDATES, CHUNK_SIZE, SCORE_THRESHOLD, CODEBASE_DIR, CACHE_PATH, STORE_PATH, FILE_EXTENSIONS
 
 SKIP_DIRS = {".git", "__pycache__", "venv", ".venv", "node_modules", ".mypy_cache", "dist", "build"}
-EMBED_BATCH_SIZE = 500  # max chunks per embedding API call
+
+# load the local embedding model if using groq - openai embeddings go through the api instead
+if PROVIDER == "groq":
+    from sentence_transformers import SentenceTransformer
+    embedder = SentenceTransformer(EMBEDDING_MODEL)
 
 vector_store: dict[str, dict] = {}
 
@@ -109,23 +113,29 @@ def build_vector_store() -> None:
 
     saved_store, saved_fingerprint = load_store_from_disk()
     if saved_store and saved_fingerprint == fingerprint:
-        # codebase hasn't changed - load straight from disk, no API calls needed
+        # codebase hasn't changed - load straight from disk, no computation needed
         vector_store = saved_store
         print(f"[RAG] Loaded {len(vector_store)} chunks from disk (no changes detected).\n")
         return
 
-    print("[RAG] Changes detected, rebuilding vector store...")
+    print("[RAG] Changes detected, rebuilding vector store")
     cache = load_cache()
 
-    # batch all uncached chunks into as few API calls as possible
     uncached = [(cid, code) for cid, code in chunks.items() if content_hash(code) not in cache]
     if uncached:
-        print(f"[RAG] Embedding {len(uncached)} new chunks in batches...")
-        for i in range(0, len(uncached), EMBED_BATCH_SIZE):
-            batch = uncached[i:i + EMBED_BATCH_SIZE]
-            response = client.embeddings.create(model=EMBEDDING_MODEL, input=[code for _, code in batch])
-            for (_, code), emb in zip(batch, response.data):
-                cache[content_hash(code)] = emb.embedding
+        print(f"[RAG] Embedding {len(uncached)} new chunks...")
+        if PROVIDER == "groq":
+            # local batch encode - no api calls, free
+            embeddings = embedder.encode([code for _, code in uncached], batch_size=64, show_progress_bar=True)
+            for (_, code), emb in zip(uncached, embeddings):
+                cache[content_hash(code)] = emb.tolist()
+        else:
+            # openai batch api - 500 chunks per call
+            for i in range(0, len(uncached), 500):
+                batch = uncached[i:i + 500]
+                response = client.embeddings.create(model=EMBEDDING_MODEL, input=[code for _, code in batch])
+                for (_, code), emb in zip(batch, response.data):
+                    cache[content_hash(code)] = emb.embedding
 
     for chunk_id, code in chunks.items():
         vector_store[chunk_id] = {"code": code, "embedding": cache[content_hash(code)]}
@@ -164,8 +174,11 @@ def rerank(query: str, candidates: list[tuple]) -> list[tuple]:
 
 def run_rag_search(user_query: str) -> str:
     # embed the question, score every chunk, re-rank the shortlist, apply threshold
-    print("[RAG] Embedding query and searching vector store...")
-    query_vec = client.embeddings.create(model=EMBEDDING_MODEL, input=user_query).data[0].embedding
+    print("[RAG] Embedding query and searching vector store")
+    if PROVIDER == "groq":
+        query_vec = embedder.encode(user_query).tolist()
+    else:
+        query_vec = client.embeddings.create(model=EMBEDDING_MODEL, input=user_query).data[0].embedding
 
     scored = [
         (chunk_id, cosine_similarity(query_vec, data["embedding"]), data["code"])
@@ -173,10 +186,9 @@ def run_rag_search(user_query: str) -> str:
     ]
     scored.sort(key=lambda x: x[1], reverse=True)
 
-    # cut anything below the score threshold before re-ranking
     candidates = [s for s in scored[:RERANK_CANDIDATES] if s[1] >= SCORE_THRESHOLD]
     if not candidates:
-        return "No relevant code found."
+        return "No relevant code found"
 
     ranked = rerank(user_query, candidates)
 

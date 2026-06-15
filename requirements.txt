@@ -1,3 +1,7 @@
 openai>=1.0.0
 tiktoken>=0.7.0
 numpy>=1.26.0
+
+# only needed when PROVIDER = "groq" in config.py
+groq>=0.9.0
+sentence-transformers>=3.0.0

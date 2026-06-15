@@ -69,14 +69,23 @@ The first run indexes your repo and saves everything to disk. Every run after th
 pip install -r requirements.txt
 ```
 
-**2. Set your OpenAI API key**
+**2. Set your API key**
+
+Supports OpenAI and Groq. Set whichever you have:
 ```bash
-# Mac/Linux
+# OpenAI (default)
 export OPENAI_API_KEY=sk-...
 
-# Windows PowerShell
-$env:OPENAI_API_KEY = "sk-..."
+# Groq
+export GROQ_API_KEY=gsk_...
 ```
+
+Then set `PROVIDER` in `config.py` to match:
+```python
+PROVIDER = "openai"  # or "groq"
+```
+
+When using Groq, chat runs through `llama-3.3-70b-versatile` and embeddings run locally via `sentence-transformers` - no second API key needed. If you switch providers, delete `.embedding_cache.json` and `.vector_store.pkl` since the embedding dimensions differ.
 
 **3. Point it at your repo**
 
@@ -97,21 +106,36 @@ First run indexes the repo and saves to disk. Subsequent runs load instantly.
 ## Example session
 
 ```
-Starting RepoMind...
 [RAG] Scanning codebase...
-[RAG] Embedding 42 new chunks in batches...
+[RAG] Changes detected, rebuilding vector store
+[RAG] Embedding 42 new chunks in batches
 [RAG] Indexed 42 chunks (42 new, 0 from cache).
 
 Ready. Ask anything about the codebase, or type 'exit' to quit.
 
 You: are there any places where user input isn't validated before hitting the database?
-[RAG] Embedding query and searching vector store...
+[RAG] Embedding query and searching vector store
 [RAG] Retrieved './api/routes.py:45-89' (similarity: 0.821)
 [RAG] Retrieved './db/queries.py:12-34' (similarity: 0.774)
 [RAG] Retrieved './auth/middleware.py:1-28' (similarity: 0.751)
+[SYSTEM] Active History Tokens: 1820 / 150000
 
-[AI]: Yes | in routes.py on line 67, the user_id parameter is passed directly
+[AI]: Yes - in routes.py on line 67, the user_id parameter is passed directly
 into the SQL query without sanitisation...
+--------------------------------------------------
+
+You: what about the auth middleware, is the JWT verified properly?
+[RAG] Embedding query and searching vector store
+[RAG] Retrieved './auth/middleware.py:1-28' (similarity: 0.893)
+[RAG] Retrieved './auth/tokens.py:12-45' (similarity: 0.811)
+[RAG] Retrieved './api/routes.py:45-89' (similarity: 0.743)
+[SYSTEM] Active History Tokens: 3204 / 150000
+
+[AI]: No - in middleware.py the token is decoded with verify_signature set to
+False, meaning any token will pass regardless of whether it was signed correctly...
+--------------------------------------------------
+
+You: exit
 ```
 
 ---
@@ -121,7 +145,7 @@ into the SQL query without sanitisation...
 All tuning knobs are in `config.py`:
 
 | Variable | Default | What it does |
-||||
+|---|---|---|
 | `CODEBASE_DIR` | `"."` | Directory to scan |
 | `MODEL_NAME` | `gpt-4o-mini` | Model used for answers and re-ranking |
 | `EMBEDDING_MODEL` | `text-embedding-3-small` | Model used for embeddings |
@@ -148,4 +172,4 @@ All tuning knobs are in `config.py`:
 ## Requirements
 
 - Python 3.10+
-- OpenAI API key
+- OpenAI API key (default) or Groq API key
