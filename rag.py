@@ -2,10 +2,12 @@ import ast
 import hashlib
 import json
 import os
+import pickle
 import numpy as np
-from config import client, EMBEDDING_MODEL, TOP_K, CHUNK_SIZE, CODEBASE_DIR, CACHE_PATH, STORE_PATH, FILE_EXTENSIONS
+from config import client, MODEL_NAME, EMBEDDING_MODEL, TOP_K, RERANK_CANDIDATES, CHUNK_SIZE, SCORE_THRESHOLD, CODEBASE_DIR, CACHE_PATH, STORE_PATH, FILE_EXTENSIONS
 
 SKIP_DIRS = {".git", "__pycache__", "venv", ".venv", "node_modules", ".mypy_cache", "dist", "build"}
+EMBED_BATCH_SIZE = 500  # max chunks per embedding API call
 
 vector_store: dict[str, dict] = {}
 
@@ -35,14 +37,14 @@ def save_cache(cache: dict) -> None:
 def load_store_from_disk() -> tuple[dict | None, str | None]:
     if not os.path.exists(STORE_PATH):
         return None, None
-    with open(STORE_PATH) as f:
-        data = json.load(f)
+    with open(STORE_PATH, "rb") as f:
+        data = pickle.load(f)
     return data["store"], data["fingerprint"]
 
 
 def save_store_to_disk(store: dict, fingerprint: str) -> None:
-    with open(STORE_PATH, "w") as f:
-        json.dump({"store": store, "fingerprint": fingerprint}, f)
+    with open(STORE_PATH, "wb") as f:
+        pickle.dump({"store": store, "fingerprint": fingerprint}, f)
 
 
 def cosine_similarity(a: list[float], b: list[float]) -> float:
@@ -112,28 +114,56 @@ def build_vector_store() -> None:
         print(f"[RAG] Loaded {len(vector_store)} chunks from disk (no changes detected).\n")
         return
 
-    # first run or files changed - embed whatever is new, pull the rest from cache
     print("[RAG] Changes detected, rebuilding vector store...")
     cache = load_cache()
-    new_count = 0
+
+    # batch all uncached chunks into as few API calls as possible
+    uncached = [(cid, code) for cid, code in chunks.items() if content_hash(code) not in cache]
+    if uncached:
+        print(f"[RAG] Embedding {len(uncached)} new chunks in batches...")
+        for i in range(0, len(uncached), EMBED_BATCH_SIZE):
+            batch = uncached[i:i + EMBED_BATCH_SIZE]
+            response = client.embeddings.create(model=EMBEDDING_MODEL, input=[code for _, code in batch])
+            for (_, code), emb in zip(batch, response.data):
+                cache[content_hash(code)] = emb.embedding
 
     for chunk_id, code in chunks.items():
-        h = content_hash(code)
-        if h in cache:
-            embedding = cache[h]  # cache hit - skip the API call
-        else:
-            embedding = client.embeddings.create(model=EMBEDDING_MODEL, input=code).data[0].embedding
-            cache[h] = embedding
-            new_count += 1
-        vector_store[chunk_id] = {"code": code, "embedding": embedding}
+        vector_store[chunk_id] = {"code": code, "embedding": cache[content_hash(code)]}
 
     save_cache(cache)
     save_store_to_disk(vector_store, fingerprint)
-    print(f"[RAG] Indexed {len(vector_store)} chunks ({new_count} new, {len(chunks) - new_count} from cache).\n")
+    print(f"[RAG] Indexed {len(vector_store)} chunks ({len(uncached)} new, {len(chunks) - len(uncached)} from cache).\n")
+
+
+def rerank(query: str, candidates: list[tuple]) -> list[tuple]:
+    # ask the LLM to pick the most relevant chunks from the cosine shortlist
+    formatted = "\n\n".join(
+        f"[{i}] {chunk_id}\n{code[:400]}"
+        for i, (chunk_id, _, code) in enumerate(candidates)
+    )
+    response = client.chat.completions.create(
+        model=MODEL_NAME,
+        messages=[{
+            "role": "user",
+            "content": (
+                f'Query: "{query}"\n\n'
+                f"Rank these code chunks by relevance. "
+                f'Return ONLY a JSON object with key "order" containing an array of indices '
+                f"sorted from most to least relevant.\n\n{formatted}"
+            )
+        }],
+        response_format={"type": "json_object"},
+        temperature=0.0,
+    )
+    try:
+        order = json.loads(response.choices[0].message.content)["order"]
+        return [candidates[i] for i in order if i < len(candidates)]
+    except (json.JSONDecodeError, KeyError, IndexError):
+        return candidates  # fall back to cosine order if parsing fails
 
 
 def run_rag_search(user_query: str) -> str:
-    # embed the question, score every chunk, hand back the top-k winners
+    # embed the question, score every chunk, re-rank the shortlist, apply threshold
     print("[RAG] Embedding query and searching vector store...")
     query_vec = client.embeddings.create(model=EMBEDDING_MODEL, input=user_query).data[0].embedding
 
@@ -143,9 +173,16 @@ def run_rag_search(user_query: str) -> str:
     ]
     scored.sort(key=lambda x: x[1], reverse=True)
 
+    # cut anything below the score threshold before re-ranking
+    candidates = [s for s in scored[:RERANK_CANDIDATES] if s[1] >= SCORE_THRESHOLD]
+    if not candidates:
+        return "No relevant code found."
+
+    ranked = rerank(user_query, candidates)
+
     snippets = []
-    for chunk_id, score, code in scored[:TOP_K]:
+    for chunk_id, score, code in ranked[:TOP_K]:
         print(f"[RAG] Retrieved '{chunk_id}' (similarity: {score:.3f})")
         snippets.append(f"--- {chunk_id} (similarity: {score:.3f}) ---\n{code}")
 
-    return "\n\n".join(snippets) if snippets else "No relevant code found."
+    return "\n\n".join(snippets)

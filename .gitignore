@@ -1,7 +1,7 @@
 .env
 .env.local
 .embedding_cache.json
-.vector_store.json
+.vector_store.pkl
 .env*.local
 __pycache__/
 *.pyc

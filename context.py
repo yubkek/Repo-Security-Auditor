@@ -10,13 +10,13 @@ def compact_history(
     conversation_history: list[dict],
     compacted_state_summary: str,
 ) -> tuple[list[dict], str]:
-    print("\n[COMPACTOR] Token threshold breached! Compacting history...")
+    print("\n[COMPACTOR] Token threshold breached, Compacting History")
 
     tail_history = conversation_history[-2:] # keep the freshest turns verbatim
     head_history = conversation_history[:-2] # everything older gets squashed
 
     if not head_history:
-        print("[COMPACTOR] Nothing to compact yet.")  # happens on the very first trigger
+        print("[COMPACTOR] Nothing to compact yet.") # happens on the very first trigger
         return conversation_history, compacted_state_summary
 
     history_string = "".join(

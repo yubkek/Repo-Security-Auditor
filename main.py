@@ -31,15 +31,20 @@ def chat_with_agent(user_message: str) -> None:
         model=MODEL_NAME,
         messages=final_messages,
         temperature=0.2,
+        stream=True,
     )
 
-    assistant_response = response.choices[0].message.content
-    print(f"\n[AI]: {assistant_response}\n" + "-" * 50)
+    print("\n[AI]: ", end="", flush=True)
+    assistant_response = ""
+    for chunk in response:
+        delta = chunk.choices[0].delta.content or ""
+        print(delta, end="", flush=True)
+        assistant_response += delta
+    print("\n" + "-" * 50)
     conversation_history.append({"role": "assistant", "content": assistant_response})
 
 
 if __name__ == "__main__":
-    print("Starting RepoMind...")
     build_vector_store()
     print("Ready. Ask anything about the codebase, or type 'exit' to quit.\n")
 
