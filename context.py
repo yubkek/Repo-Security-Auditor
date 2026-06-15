@@ -1,7 +1,10 @@
 import tiktoken
 from config import client, MODEL_NAME, TOKEN_THRESHOLD
 
-tokenizer = tiktoken.encoding_for_model(MODEL_NAME)
+try:
+    tokenizer = tiktoken.encoding_for_model(MODEL_NAME)
+except KeyError:
+    tokenizer = tiktoken.get_encoding("cl100k_base")  # fallback for non-openai models
 
 def count_tokens(text: str) -> int:
     return len(tokenizer.encode(text))
